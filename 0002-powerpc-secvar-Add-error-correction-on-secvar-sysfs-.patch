@@ -1,0 +1,114 @@
+From 2fa2c94f951fd0932b2a1d311a98b75097496f0d Mon Sep 17 00:00:00 2001
+From: root <root@ltcrain80-lp7.aus.stglabs.ibm.com>
+Date: Wed, 29 May 2024 09:27:50 -0500
+Subject: [PATCH 2/2] powerpc/secvar: Add error correction on secvar sysfs
+ interface based on SB_VERSION value
+
+Expose the secvar sysfs interface based on the SB_VERSION value. The SB_VERSION value indicates
+whether the power LPAR is in dynamic secure boot scenario. In case of dynamic secure boot
+scenario, expose the secvar interface for secure variables as it is only needed in that case.
+Also expose the format which stores the SB_VERSION property. Otherwise, hide these sysfs files
+and expose only PK, trustedcadb and moduledb files which are needed for static secure boot
+scenario.
+
+Signed-off-by: root <root@ltcrain80-lp7.aus.stglabs.ibm.com>
+---
+ arch/powerpc/kernel/secvar-sysfs.c            | 17 +++++++-----
+ arch/powerpc/platforms/pseries/plpks-secvar.c | 27 ++++++++++++++++---
+ 2 files changed, 33 insertions(+), 11 deletions(-)
+
+diff --git a/arch/powerpc/kernel/secvar-sysfs.c b/arch/powerpc/kernel/secvar-sysfs.c
+index eb3c053f323f..4f468d74e135 100644
+--- a/arch/powerpc/kernel/secvar-sysfs.c
++++ b/arch/powerpc/kernel/secvar-sysfs.c
+@@ -12,6 +12,7 @@
+ #include <linux/string.h>
+ #include <linux/of.h>
+ #include <asm/secvar.h>
++#include <asm/plpks.h>
+ 
+ #define NAME_MAX_SIZE	   1024
+ 
+@@ -240,13 +241,15 @@ static int secvar_sysfs_init(void)
+ 		return -ENOMEM;
+ 	}
+ 
+-	rc = sysfs_create_file(secvar_kobj, &format_attr.attr);
+-	if (rc) {
+-		pr_err("Failed to create format object\n");
+-		rc = -ENOMEM;
+-		goto err;
+-	}
+-
++	if(!plpks_get_sb_version()) {
++        	rc = sysfs_create_file(secvar_kobj, &format_attr.attr);
++		if (rc) {
++			pr_err("Failed to create format object\n");
++			rc = -ENOMEM;
++			goto err;
++		}
++	}       
++	
+ 	secvar_kset = kset_create_and_add("vars", NULL, secvar_kobj);
+ 	if (!secvar_kset) {
+ 		pr_err("sysfs kobject registration failed\n");
+diff --git a/arch/powerpc/platforms/pseries/plpks-secvar.c b/arch/powerpc/platforms/pseries/plpks-secvar.c
+index 257fd1f8bc19..1c976e0057db 100644
+--- a/arch/powerpc/platforms/pseries/plpks-secvar.c
++++ b/arch/powerpc/platforms/pseries/plpks-secvar.c
+@@ -59,7 +59,14 @@ static u32 get_policy(const char *name)
+ 		return PLPKS_SIGNEDUPDATE;
+ }
+ 
+-static const char * const plpks_var_names[] = {
++static const char * const plpks_var_names_static[] = {
++        "PK",
++        "moduledb",
++        "trustedcadb",
++        NULL,
++};
++
++static const char * const plpks_var_names_dynamic[] = {
+ 	"PK",
+ 	"KEK",
+ 	"db",
+@@ -197,14 +204,22 @@ static int plpks_max_size(u64 *max_size)
+ 	return 0;
+ }
+ 
++static const struct secvar_operations plpks_secvar_ops_static = {
++        .get = plpks_get_variable,
++        .set = plpks_set_variable,
++        .format = plpks_secvar_format,
++        .max_size = plpks_max_size,
++        .config_attrs = config_attrs,
++        .var_names = plpks_var_names_static,
++};
+ 
+-static const struct secvar_operations plpks_secvar_ops = {
++static const struct secvar_operations plpks_secvar_ops_dynamic = {
+ 	.get = plpks_get_variable,
+ 	.set = plpks_set_variable,
+ 	.format = plpks_secvar_format,
+ 	.max_size = plpks_max_size,
+ 	.config_attrs = config_attrs,
+-	.var_names = plpks_var_names,
++	.var_names = plpks_var_names_dynamic,
+ };
+ 
+ static int plpks_secvar_init(void)
+@@ -212,6 +227,10 @@ static int plpks_secvar_init(void)
+ 	if (!plpks_is_available())
+ 		return -ENODEV;
+ 
+-	return set_secvar_ops(&plpks_secvar_ops);
++	if(plpks_get_sb_version()) 
++		return set_secvar_ops(&plpks_secvar_ops_static);
++        else
++		return set_secvar_ops(&plpks_secvar_ops_dynamic);
++
+ }
+ machine_device_initcall(pseries, plpks_secvar_init);
+-- 
+2.39.1
+

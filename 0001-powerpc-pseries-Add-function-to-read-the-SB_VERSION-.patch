@@ -1,0 +1,63 @@
+From afc283891d9165d63f0a5d91e2c39665fc1af4c4 Mon Sep 17 00:00:00 2001
+From: root <root@ltcrain80-lp7.aus.stglabs.ibm.com>
+Date: Wed, 29 May 2024 09:17:16 -0500
+Subject: [PATCH 1/2] powerpc/pseries: Add function to read the SB_VERSION
+ property from firmware
+
+Add the function that makes HCALL to get the value of SB_VERSION from the
+firmware. A value of 1 indicates that the LPAR is in dynamic secure boot
+scenario whereas a non-existent value indicates a static secure boot or
+non secure boot scenario.
+
+Signed-off-by: root <root@ltcrain80-lp7.aus.stglabs.ibm.com>
+---
+ arch/powerpc/include/asm/plpks.h       |  5 +++++
+ arch/powerpc/platforms/pseries/plpks.c | 16 ++++++++++++++++
+ 2 files changed, 21 insertions(+)
+
+diff --git a/arch/powerpc/include/asm/plpks.h b/arch/powerpc/include/asm/plpks.h
+index 7a84069759b0..c8dcdd6119f7 100644
+--- a/arch/powerpc/include/asm/plpks.h
++++ b/arch/powerpc/include/asm/plpks.h
+@@ -122,6 +122,11 @@ bool plpks_is_available(void);
+  */
+ u8 plpks_get_version(void);
+ 
++/**
++ * Returns SB_VERSION value from firmware.
++*/
++int plpks_get_sb_version(void);
++
+ /**
+  * Returns hypervisor storage overhead per object, not including the size of
+  * the object or label. Only valid for config version >= 2
+diff --git a/arch/powerpc/platforms/pseries/plpks.c b/arch/powerpc/platforms/pseries/plpks.c
+index 4a595493d28a..8804ee9984e4 100644
+--- a/arch/powerpc/platforms/pseries/plpks.c
++++ b/arch/powerpc/platforms/pseries/plpks.c
+@@ -126,6 +126,22 @@ static int pseries_status_to_err(int rc)
+ 	return err;
+ }
+ 
++int plpks_get_sb_version(void)
++{
++        struct plpks_var var = {0};
++        u8 version;
++
++        var.component = NULL;
++       // Only the signed variables have null bytes in their names, this one doesn't
++        var.name = "SB_VERSION";
++        var.namelen = strlen(var.name);
++        var.datalen = 1;
++        var.data = &version;
++
++        // Unlike the other vars, SB_VERSION is owned by firmware instead of the OS
++        return plpks_read_fw_var(&var);
++}
++
+ static int plpks_gen_password(void)
+ {
+ 	unsigned long retbuf[PLPAR_HCALL_BUFSIZE] = { 0 };
+-- 
+2.39.1
+
